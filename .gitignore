@@ -1,0 +1,112 @@
+# ======================
+# Python / AI 추론 서버
+# ======================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+pip-log.txt
+
+# HuggingFace 모델 캐시 (수 GB → 절대 커밋 금지)
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+models/
+model_weights/
+
+# 환경변수 (비밀키 절대 커밋 금지)
+.env
+.env.local
+.env.production
+.env.*.local
+*.env
+
+# ======================
+# Next.js / Node.js
+# ======================
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+
+# ======================
+# Flutter / Dart
+# ======================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# ======================
+# Docker
+# ======================
+docker-compose.override.yml
+
+# ======================
+# 데이터베이스
+# ======================
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+chroma_data/
+redis_data/
+
+# ======================
+# 로그
+# ======================
+*.log
+logs/
+log/
+
+# ======================
+# OS 생성 파일
+# ======================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ======================
+# IDE / 에디터
+# ======================
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# n8n 민감 설정 (환경 설정 파일은 커밋 금지)
+n8nac-config.json
+
+# ======================
+# 인증서 / 키
+# ======================
+*.pem
+*.key
+*.crt
+*.p12
