@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>점마 뭐꼬? 🖋️</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --surface: #1a1a24;
+    --surface2: #23232f;
+    --border: #2e2e3e;
+    --accent: #a78bfa;
+    --accent2: #7c3aed;
+    --text: #e2e2f0;
+    --text-muted: #8888aa;
+    --user-bubble: #2d2250;
+    --ai-bubble: #1e1e2e;
+    --danger: #f87171;
+    --success: #4ade80;
+    --font: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── 헤더 ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .header-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.3px;
+  }
+  .header-title span { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; margin-left: 8px; }
+  .header-actions { display: flex; gap: 8px; }
+  .btn-icon {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: all 0.15s;
+  }
+  .btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 레이아웃 ── */
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── 사이드바 ── */
+  .sidebar {
+    width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: width 0.2s;
+  }
+  .sidebar.collapsed { width: 0; }
+
+  .sidebar-section {
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section h3 {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  .context-textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.82rem;
+    padding: 8px 10px;
+    resize: none;
+    font-family: var(--font);
+    line-height: 1.5;
+  }
+  .context-textarea:focus { outline: none; border-color: var(--accent); }
+  .context-textarea::placeholder { color: var(--text-muted); }
+
+  /* 퀵액션 버튼들 */
+  .quick-actions {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .quick-actions h3 {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 4px;
+  }
+  .qa-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    text-align: left;
+    transition: all 0.15s;
+    font-family: var(--font);
+    line-height: 1.3;
+  }
+  .qa-btn:hover { background: var(--user-bubble); border-color: var(--accent); color: var(--accent); }
+  .qa-btn .qa-icon { margin-right: 6px; }
+
+  /* 파라미터 슬라이더 */
+  .param-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .param-label { font-size: 0.78rem; color: var(--text-muted); }
+  .param-value { font-size: 0.78rem; color: var(--accent); font-weight: 600; min-width: 30px; text-align: right; }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* ── 채팅 영역 ── */
+  .chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+  }
+  .messages::-webkit-scrollbar { width: 5px; }
+  .messages::-webkit-scrollbar-track { background: transparent; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* 메시지 버블 */
+  .msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 78%;
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; align-items: flex-start; }
+
+  .msg-role {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .msg.user .msg-role { color: var(--accent); }
+
+  .msg-bubble {
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 0.92rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user .msg-bubble {
+    background: var(--user-bubble);
+    border: 1px solid #3d2e7a;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant .msg-bubble {
+    background: var(--ai-bubble);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+
+  /* 커서 깜빡임 (스트리밍 중) */
+  .cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background: var(--accent);
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: blink 0.8s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 환영 메시지 */
+  .welcome {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px;
+    gap: 12px;
+  }
+  .welcome .logo { font-size: 3rem; }
+  .welcome h2 { font-size: 1.4rem; color: var(--accent); font-weight: 700; }
+  .welcome p { font-size: 0.9rem; line-height: 1.6; max-width: 360px; }
+
+  /* ── 입력 영역 ── */
+  .input-area {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .input-wrapper {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    align-items: flex-end;
+    padding: 2px 4px;
+    transition: border-color 0.15s;
+  }
+  .input-wrapper:focus-within { border-color: var(--accent); }
+
+  #userInput {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 0.92rem;
+    font-family: var(--font);
+    padding: 8px 10px;
+    resize: none;
+    max-height: 150px;
+    line-height: 1.5;
+  }
+  #userInput::placeholder { color: var(--text-muted); }
+
+  .btn-send {
+    background: var(--accent2);
+    border: none;
+    color: white;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+  }
+  .btn-send:hover:not(:disabled) { background: var(--accent); }
+  .btn-send:disabled { background: var(--border); cursor: not-allowed; opacity: 0.5; }
+
+  .btn-stop {
+    background: #991b1b;
+    border: none;
+    color: white;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    font-family: var(--font);
+    transition: background 0.15s;
+  }
+  .btn-stop:hover { background: var(--danger); }
+  .btn-stop.visible { display: flex; }
+
+  /* 상태 표시 */
+  .status-bar {
+    padding: 4px 20px 2px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    display: inline-block;
+  }
+  .dot.loading { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* 반응형 */
+  @media (max-width: 640px) {
+    .sidebar { display: none; }
+    .msg { max-width: 92%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 헤더 -->
+<header>
+  <div class="header-title">
+    🖋️ 점마 뭐꼬?
+    <span>웹소설 · 시나리오 창작 AI</span>
+  </div>
+  <div class="header-actions">
+    <button class="btn-icon" onclick="toggleSidebar()">⚙ 설정</button>
+    <button class="btn-icon" onclick="clearChat()">🗑 대화 초기화</button>
+  </div>
+</header>
+
+<!-- 레이아웃 -->
+<div class="layout">
+
+  <!-- 사이드바 -->
+  <aside class="sidebar" id="sidebar">
+
+    <!-- 작품 설정 컨텍스트 -->
+    <div class="sidebar-section">
+      <h3>📖 작품 설정</h3>
+      <textarea class="context-textarea" id="worldContext" rows="5"
+        placeholder="캐릭터, 세계관, 장르 등을 입력하면 AI가 참고합니다.
+예) 주인공: 이재훈, 26세, 회귀자
+장르: 현대판타지/시스템
+특징: 냉소적이지만 의리있음"></textarea>
+    </div>
+
+    <!-- 생성 파라미터 -->
+    <div class="sidebar-section">
+      <h3>⚙ 생성 설정</h3>
+      <div class="param-row">
+        <span class="param-label">창의성 (temperature)</span>
+        <span class="param-value" id="tempVal">0.85</span>
+      </div>
+      <input type="range" id="temperature" min="0.1" max="1.5" step="0.05" value="0.85"
+        oninput="document.getElementById('tempVal').textContent = this.value">
+      <br><br>
+      <div class="param-row">
+        <span class="param-label">최대 토큰 수</span>
+        <span class="param-value" id="tokenVal">512</span>
+      </div>
+      <input type="range" id="maxTokens" min="128" max="1024" step="64" value="512"
+        oninput="document.getElementById('tokenVal').textContent = this.value">
+      <br><br>
+      <div class="param-row">
+        <span class="param-label">반복 억제</span>
+        <span class="param-value" id="repVal">1.1</span>
+      </div>
+      <input type="range" id="repPenalty" min="1.0" max="1.5" step="0.05" value="1.1"
+        oninput="document.getElementById('repVal').textContent = parseFloat(this.value).toFixed(2)">
+    </div>
+
+    <!-- 퀵 액션 -->
+    <div class="quick-actions">
+      <h3>⚡ 퀵 액션</h3>
+      <button class="qa-btn" onclick="quickAction('character')">
+        <span class="qa-icon">🧑</span>캐릭터 만들기
+      </button>
+      <button class="qa-btn" onclick="quickAction('world')">
+        <span class="qa-icon">🌍</span>세계관 구축하기
+      </button>
+      <button class="qa-btn" onclick="quickAction('scene')">
+        <span class="qa-icon">🎬</span>장면 묘사하기
+      </button>
+      <button class="qa-btn" onclick="quickAction('dialogue')">
+        <span class="qa-icon">💬</span>대화문 쓰기
+      </button>
+      <button class="qa-btn" onclick="quickAction('plot')">
+        <span class="qa-icon">🔀</span>다음 전개 제안
+      </button>
+      <button class="qa-btn" onclick="quickAction('climax')">
+        <span class="qa-icon">⚡</span>클라이맥스 연출
+      </button>
+      <button class="qa-btn" onclick="quickAction('title')">
+        <span class="qa-icon">✨</span>제목 & 캐치프레이즈
+      </button>
+      <button class="qa-btn" onclick="quickAction('synopsis')">
+        <span class="qa-icon">📝</span>시놉시스 작성
+      </button>
+    </div>
+  </aside>
+
+  <!-- 채팅 영역 -->
+  <div class="chat-area">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcomeMsg">
+        <div class="logo">🖋️</div>
+        <h2>점마 뭐꼬?</h2>
+        <p>웹소설 · 드라마 · 판타지 · 로맨스<br>무엇이든 함께 써드립니다.</p>
+        <p style="margin-top:8px; font-size:0.8rem;">왼쪽 설정 패널에서 작품 세계관을 입력하거나,<br>퀵 액션을 눌러 바로 시작해보세요!</p>
+      </div>
+    </div>
+
+    <!-- 입력창 -->
+    <div class="input-area">
+      <div class="input-wrapper">
+        <textarea id="userInput" rows="1" placeholder="무엇을 써드릴까요? (Shift+Enter 줄바꿈, Enter 전송)"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      </div>
+      <button class="btn-stop" id="btnStop" onclick="stopGeneration()">■ 중지</button>
+      <button class="btn-send" id="btnSend" onclick="sendMessage()" title="전송">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- 상태 바 -->
+    <div class="status-bar">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">준비됨</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 상태 ──────────────────────────────────────────────
+const conversationHistory = [];  // [{role, content}, ...]
+let isGenerating = false;
+let abortController = null;
+
+// ── 퀵 액션 프롬프트 ──────────────────────────────────
+const QUICK_PROMPTS = {
+  character: "새로운 캐릭터를 만들어 주세요. 이름, 나이, 외모, 성격, 능력, 배경 이야기를 포함해서 생동감 있게 설정해 주세요. (왼쪽 작품 설정이 있다면 그에 맞게 만들어 주세요)",
+  world: "작품의 세계관을 구축해 주세요. 시대 배경, 사회 구조, 특수 능력/시스템, 세력 구도 등을 상세히 설정해 주세요.",
+  scene: "지금 상황의 장면을 생동감 있게 묘사해 주세요. 어떤 장면을 묘사할지 알려주시면 더욱 구체적으로 써드릴게요!",
+  dialogue: "캐릭터들 간의 대화문을 써주세요. 어떤 상황의 대화인지 알려주세요. (예: 처음 만난 두 적대 관계의 첫 대화)",
+  plot: "현재까지의 이야기에서 다음 전개 방향을 3가지 제안해 주세요. 각 선택지의 특징과 독자 반응 예상도 함께 알려주세요.",
+  climax: "클라이맥스 장면을 강렬하게 연출해 주세요. 어떤 장면을 클라이맥스로 만들지 알려주시면 최대한 극적으로 써드릴게요!",
+  title: "작품의 제목 후보 5개와 각각의 캐치프레이즈를 만들어 주세요. 웹소설 독자의 시선을 사로잡을 수 있는 제목으로 부탁드립니다.",
+  synopsis: "작품의 시놉시스를 작성해 주세요. 주인공, 핵심 갈등, 전개 방향, 결말 방향을 포함한 1페이지 분량의 시놉시스를 써주세요.",
+};
+
+// ── UI 유틸 ──────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+function setStatus(text, loading = false) {
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('statusDot').className = 'dot' + (loading ? ' loading' : '');
+}
+
+function scrollToBottom() {
+  const msgs = document.getElementById('messages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function clearChat() {
+  if (isGenerating) return;
+  conversationHistory.length = 0;
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = `
+    <div class="welcome" id="welcomeMsg">
+      <div class="logo">🖋️</div>
+      <h2>점마 뭐꼬?</h2>
+      <p>웹소설 · 드라마 · 판타지 · 로맨스<br>무엇이든 함께 써드립니다.</p>
+      <p style="margin-top:8px; font-size:0.8rem;">왼쪽 설정 패널에서 작품 세계관을 입력하거나,<br>퀵 액션을 눌러 바로 시작해보세요!</p>
+    </div>`;
+  setStatus('준비됨');
+}
+
+function quickAction(type) {
+  if (isGenerating) return;
+  const input = document.getElementById('userInput');
+  input.value = QUICK_PROMPTS[type];
+  input.focus();
+  autoResize(input);
+}
+
+// ── 메시지 렌더링 ─────────────────────────────────────
+function addMessage(role, content, streaming = false) {
+  const welcome = document.getElementById('welcomeMsg');
+  if (welcome) welcome.remove();
+
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `
+    <div class="msg-role">${role === 'user' ? '👤 나' : '🖋️ 점마 뭐꼬?'}</div>
+    <div class="msg-bubble" id="bubble-${Date.now()}">${escapeHtml(content)}${streaming ? '<span class="cursor"></span>' : ''}</div>`;
+  document.getElementById('messages').appendChild(div);
+  scrollToBottom();
+  return div.querySelector('.msg-bubble');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function stopGeneration() {
+  if (abortController) {
+    abortController.abort();
+  }
+}
+
+// ── 메시지 전송 & 스트리밍 ────────────────────────────
+async function sendMessage() {
+  if (isGenerating) return;
+
+  const input = document.getElementById('userInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  // 사용자 메시지 표시
+  addMessage('user', text);
+  conversationHistory.push({ role: 'user', content: text });
+  input.value = '';
+  input.style.height = 'auto';
+
+  // UI 상태 변경
+  isGenerating = true;
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnStop').classList.add('visible');
+  setStatus('생성 중...', true);
+
+  // AI 응답 버블 생성
+  const aiBubble = addMessage('assistant', '', true);
+  let fullResponse = '';
+
+  // 작품 설정 컨텍스트
+  const worldContext = document.getElementById('worldContext').value.trim();
+
+  const requestBody = {
+    messages: conversationHistory.map(m => ({ role: m.role, content: m.content })),
+    max_new_tokens: parseInt(document.getElementById('maxTokens').value),
+    temperature: parseFloat(document.getElementById('temperature').value),
+    repetition_penalty: parseFloat(document.getElementById('repPenalty').value),
+    rag_context: worldContext || null,
+  };
+
+  abortController = new AbortController();
+
+  try {
+    const response = await fetch('/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: abortController.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`서버 오류: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();  // 불완전한 마지막 줄 보존
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') break;
+
+        try {
+          const parsed = JSON.parse(data);
+          fullResponse += parsed.token;
+          // 커서 앞에 새 토큰 삽입
+          const cursor = aiBubble.querySelector('.cursor');
+          if (cursor) {
+            cursor.insertAdjacentText('beforebegin', parsed.token);
+          } else {
+            aiBubble.textContent = fullResponse;
+          }
+          scrollToBottom();
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      fullResponse += '\n[생성 중지됨]';
+    } else {
+      fullResponse = `오류가 발생했습니다: ${err.message}`;
+    }
+  } finally {
+    // 커서 제거, 최종 텍스트 확정
+    aiBubble.textContent = fullResponse;
+    conversationHistory.push({ role: 'assistant', content: fullResponse });
+
+    isGenerating = false;
+    abortController = null;
+    document.getElementById('btnSend').disabled = false;
+    document.getElementById('btnStop').classList.remove('visible');
+    setStatus('준비됨');
+    scrollToBottom();
+  }
+}
+</script>
+</body>
+</html>
