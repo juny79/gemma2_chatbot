@@ -14,3 +14,32 @@ class ChatRequest(BaseModel):
     top_p: float = Field(default=0.92, ge=0.0, le=1.0)
     repetition_penalty: float = Field(default=1.1, ge=1.0, le=2.0)
     rag_context: Optional[str] = None  # Phase 2: RAG에서 주입되는 참고 문맥
+
+
+# ── 세션 관련 스키마 ─────────────────────────────────────
+
+class SessionCreate(BaseModel):
+    title: str = "새 대화"
+
+
+class SessionTitleUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=100)
+
+
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class MessageResponse(BaseModel):
+    id: int
+    session_id: str
+    role: str
+    content: str
+    created_at: str
+
+
+class SaveMessagesRequest(BaseModel):
+    messages: List[Message]
