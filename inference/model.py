@@ -1,25 +1,28 @@
+import os
 import torch
-from awq import AutoAWQForCausalLM
-from transformers import AutoTokenizer, TextIteratorStreamer
-from threading import Thread
 from typing import Generator
 from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
 
-# inference/ 폴더 기준으로 상위 디렉토리의 models 폴더를 절대 경로로 지정
-MODEL_PATH = str(Path(__file__).parent.parent / "models" / "gemma-2-9b-it-AWQ")
+# Windows에서 llama_cpp 임포트 전에 torch 번들 CUDA DLL 경로를 추가해야 함
+_torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+os.add_dll_directory(_torch_lib)
+
+from llama_cpp import Llama  # noqa: E402
+
+# GGUF 모델 경로
+GGUF_PATH = str(Path(__file__).parent.parent / "models" / "gemma-2-9b-it-Q4_K_M.gguf")
 
 
 class GemmaInference:
-    """AutoAWQ 기반 Gemma-2 추론 싱글턴 클래스"""
+    """llama-cpp-python 기반 Gemma-2 추론 싱글턴 클래스 (CUDA GPU 오프로드)"""
 
     _instance: "GemmaInference | None" = None
 
     def __init__(self):
-        self.model = None
-        self.tokenizer = None
+        self.model: Llama | None = None
         self._load()
 
     @classmethod
@@ -29,17 +32,15 @@ class GemmaInference:
         return cls._instance
 
     def _load(self):
-        logger.info("토크나이저 로딩 중...")
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-
-        logger.info("모델 로딩 중 (VRAM에 AWQ 가중치 적재)...")
-        self.model = AutoAWQForCausalLM.from_quantized(
-            MODEL_PATH,
-            fuse_layers=True,
-            safetensors=True,
+        logger.info(f"GGUF 모델 로딩 중: {GGUF_PATH}")
+        self.model = Llama(
+            model_path=GGUF_PATH,
+            n_gpu_layers=-1,   # 전체 레이어를 GPU에 오프로드
+            n_ctx=4096,        # 컨텍스트 윈도우
+            n_batch=512,       # 배치 크기
+            verbose=False,
         )
-        device = next(self.model.parameters()).device
-        logger.info(f"모델 준비 완료: {device}")
+        logger.info("모델 준비 완료 (CUDA GPU 전체 오프로드)")
 
     def stream_generate(
         self,
@@ -51,35 +52,15 @@ class GemmaInference:
     ) -> Generator[str, None, None]:
         """토큰 단위 스트리밍 제너레이터"""
 
-        # 채팅 템플릿 적용
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
+        response = self.model.create_chat_completion(
+            messages=messages,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repeat_penalty=repetition_penalty,
+            stream=True,
         )
-        inputs = self.tokenizer([text], return_tensors="pt").to("cuda")
-
-        streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True,
-        )
-
-        generation_kwargs = {
-            **inputs,
-            "streamer": streamer,
-            "max_new_tokens": max_new_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "repetition_penalty": repetition_penalty,
-            "do_sample": True,
-        }
-
-        # 별도 스레드에서 generation 실행
-        thread = Thread(target=self.model.generate, kwargs=generation_kwargs, daemon=True)
-        thread.start()
-
-        for token in streamer:
-            yield token
-
-        thread.join()
+        for chunk in response:
+            content = chunk["choices"][0]["delta"].get("content", "")
+            if content:
+                yield content
