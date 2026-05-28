@@ -36,7 +36,7 @@ class GemmaInference:
         self.model = Llama(
             model_path=GGUF_PATH,
             n_gpu_layers=-1,   # 전체 레이어를 GPU에 오프로드
-            n_ctx=4096,        # 컨텍스트 윈도우
+            n_ctx=8192,        # 컨텍스트 윈도우 (모델 최대값)
             n_batch=512,       # 배치 크기
             verbose=False,
         )
@@ -45,7 +45,7 @@ class GemmaInference:
     def stream_generate(
         self,
         messages: list[dict],
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 2048,
         temperature: float = 0.85,
         top_p: float = 0.92,
         repetition_penalty: float = 1.1,
