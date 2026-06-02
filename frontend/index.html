@@ -408,6 +408,23 @@
   }
   .btn-new-session:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* 세션 검색 */
+  .session-search {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.8rem;
+    padding: 5px 8px;
+    margin-bottom: 6px;
+    font-family: var(--font);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .session-search:focus { border-color: var(--accent); }
+  .session-search::placeholder { color: var(--text-muted); }
+
   /* ── 마크다운 렌더링 ── */
   .msg-bubble.md-rendered { white-space: normal; }
   .msg-bubble.md-rendered > *:first-child { margin-top: 0; }
@@ -491,6 +508,7 @@
   .msg-bubble.md-rendered tr:nth-child(even) { background: rgba(255,255,255,0.03); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 </head>
 <body>
 
@@ -501,6 +519,7 @@
     <span>웹소설 · 시나리오 창작 AI</span>
   </div>
   <div class="header-actions">
+    <button class="btn-icon" onclick="exportChat()">💾 내보내기</button>
     <button class="btn-icon" onclick="toggleSidebar()">⚙ 설정</button>
     <button class="btn-icon" onclick="clearChat()">🗑 대화 초기화</button>
   </div>
@@ -516,6 +535,8 @@
     <div class="sidebar-section">
       <h3>💾 대화 세션</h3>
       <button class="btn-new-session" onclick="newSession()">＋ 새 대화 시작</button>
+      <input class="session-search" id="sessionSearch" type="text" placeholder="🔍 세션 검색..."
+        oninput="searchSessions(this.value)">
       <div class="session-list" id="sessionList"></div>
     </div>
 
@@ -623,6 +644,8 @@ const conversationHistory = [];  // [{role, content}, ...]
 let isGenerating = false;
 let abortController = null;
 let currentSessionId = null;   // 현재 활성 세션 ID (null = 아직 미저장)
+let lastUserMsg = '';          // 중단 시 부분 저장용
+let fullResponse = '';         // 현재 스트리밍 응답 (중단 시 저장용)
 
 // ── 퀵 액션 프롬프트 ──────────────────────────────────
 const QUICK_PROMPTS = {
@@ -663,6 +686,28 @@ function handleKey(e) {
   }
 }
 
+// ── 대화 내보내기 (Markdown 파일 다운로드) ──────────
+function exportChat() {
+  if (conversationHistory.length === 0) {
+    alert('내보낼 대화 내용이 없습니다.');
+    return;
+  }
+  const lines = ['# 점마 뭐꼬? — 대화 내보내기\n'];
+  lines.push(`> 내보내기 시각: ${new Date().toLocaleString('ko-KR')}\n`);
+  for (const msg of conversationHistory) {
+    const role = msg.role === 'user' ? '**[사용자]**' : '**[점마]**';
+    lines.push(`${role}\n\n${msg.content}\n`);
+    lines.push('---\n');
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chat_${Date.now()}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function clearChat() {
   if (isGenerating) return;
   conversationHistory.length = 0;
@@ -688,12 +733,17 @@ function quickAction(type) {
 }
 
 // ── 세션 관리 ─────────────────────────────────────────
-async function loadSessions() {
+async function loadSessions(q = '') {
   try {
-    const res = await fetch('/sessions');
+    const url = q ? `/sessions?q=${encodeURIComponent(q)}` : '/sessions';
+    const res = await fetch(url);
     const sessions = await res.json();
     renderSessionList(sessions);
   } catch (_) {}
+}
+
+async function searchSessions(q) {
+  await loadSessions(q);
 }
 
 function renderSessionList(sessions) {
@@ -757,16 +807,22 @@ async function deleteSession(id, event) {
 
 async function ensureSession(firstUserMsg) {
   if (currentSessionId) return;
-  // 첫 메시지 앞 25자를 제목으로 사용
-  const title = firstUserMsg.slice(0, 25) + (firstUserMsg.length > 25 ? '…' : '');
+  // 첫 메시지 앞 25자를 임시 제목으로 사용 후 자동 제목으로 교체
+  const tempTitle = firstUserMsg.slice(0, 25) + (firstUserMsg.length > 25 ? '…' : '');
   const res = await fetch('/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title: tempTitle }),
   });
   const session = await res.json();
   currentSessionId = session.id;
   await loadSessions();
+  // LLM 자동 제목 생성 (백그라운드, 실패해도 무관)
+  fetch(`/sessions/${currentSessionId}/auto-title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_user_message: firstUserMsg }),
+  }).then(() => loadSessions()).catch(() => {});
 }
 
 async function saveExchange(userMsg, assistantMsg) {
@@ -787,12 +843,13 @@ async function saveExchange(userMsg, assistantMsg) {
   } catch (_) {}
 }
 
-// ── 마크다운 렌더링 ──────────────────────────────────
+// ── 마크다운 렌더링 (DOMPurify XSS 방지 적용) ────────
 marked.setOptions({ breaks: true, gfm: true });
 
 function renderMarkdown(text) {
   if (!text) return '';
-  return marked.parse(text);
+  const rawHtml = marked.parse(text);
+  return DOMPurify.sanitize(rawHtml);
 }
 
 function escapeHtml(str) {
@@ -826,6 +883,10 @@ function addMessage(role, content, streaming = false) {
 function stopGeneration() {
   if (abortController) {
     abortController.abort();
+    // 지금까지 수신된 부분 응답 저장
+    if (typeof fullResponse !== 'undefined' && fullResponse && currentSessionId && lastUserMsg) {
+      saveExchange(lastUserMsg, fullResponse + '\n\n*[생성 중단됨]*').catch(() => {});
+    }
   }
 }
 
@@ -852,9 +913,12 @@ async function sendMessage() {
   document.getElementById('btnStop').classList.add('visible');
   setStatus('생성 중...', true);
 
+  // 중단 저장용 상태 기록
+  lastUserMsg = text;
+  fullResponse = '';
+
   // AI 응답 버블 생성
   const aiBubble = addMessage('assistant', '', true);
-  let fullResponse = '';
 
   // 작품 설정 컨텍스트
   const worldContext = document.getElementById('worldContext').value.trim();
