@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  chatbot:
+    build: .
+    container_name: gemma2_chatbot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 호스트의 models/ 및 data/ 를 컨테이너에 마운트 (모델 파일 / DB 영속화)
+      - ./models:/app/models
+      - ./data:/app/data
+    environment:
+      - GGUF_MODEL_PATH=/app/models/gemma-2-9b-it-Q4_K_M.gguf
+      - N_GPU_LAYERS=-1
+      - N_CTX=8192
+      - N_BATCH=512
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DB_PATH=/app/data/chatbot.db
+    # NVIDIA GPU 접근 허용
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
