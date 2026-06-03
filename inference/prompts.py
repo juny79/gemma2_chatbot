@@ -67,3 +67,16 @@ def build_messages(history: list[dict], user_message: str, rag_context: str | No
         messages.append({"role": "user", "content": user_message})
 
     return messages
+
+
+def build_auto_title_messages(first_user_message: str) -> list[dict]:
+    """
+    첫 번째 사용자 메시지를 받아 간결한 세션 제목을 생성하는 프롬프트.
+    Gemma-2 system role 미지원으로 user 메시지에 지시를 포함합니다.
+    """
+    instruction = (
+        "다음 요청 내용을 읽고, 이 대화 세션의 제목을 한 줄로 작성해 주세요. "
+        "제목만 출력하고 설명은 쓰지 마세요. 최대 20자 이내로 간결하게.\n\n"
+        f"요청: {first_user_message}"
+    )
+    return [{"role": "user", "content": instruction}]

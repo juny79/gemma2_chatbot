@@ -4,6 +4,8 @@ from typing import Generator
 from pathlib import Path
 import logging
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
 # Windows에서 llama_cpp 임포트 전에 torch 번들 CUDA DLL 경로를 추가해야 함
@@ -11,9 +13,6 @@ _torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
 os.add_dll_directory(_torch_lib)
 
 from llama_cpp import Llama  # noqa: E402
-
-# GGUF 모델 경로
-GGUF_PATH = str(Path(__file__).parent.parent / "models" / "gemma-2-9b-it-Q4_K_M.gguf")
 
 
 class GemmaInference:
@@ -32,15 +31,33 @@ class GemmaInference:
         return cls._instance
 
     def _load(self):
-        logger.info(f"GGUF 모델 로딩 중: {GGUF_PATH}")
+        model_path = Path(settings.gguf_model_path)
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"GGUF 모델 파일을 찾을 수 없습니다: {model_path}\n"
+                f".env 또는 GGUF_MODEL_PATH 환경 변수로 경로를 지정하세요."
+            )
+        logger.info(f"GGUF 모델 로딩 중: {model_path}")
         self.model = Llama(
-            model_path=GGUF_PATH,
-            n_gpu_layers=-1,   # 전체 레이어를 GPU에 오프로드
-            n_ctx=8192,        # 컨텍스트 윈도우 (모델 최대값)
-            n_batch=512,       # 배치 크기
+            model_path=str(model_path),
+            n_gpu_layers=settings.n_gpu_layers,
+            n_ctx=settings.n_ctx,
+            n_batch=settings.n_batch,
             verbose=False,
         )
         logger.info("모델 준비 완료 (CUDA GPU 전체 오프로드)")
+
+    def warmup(self) -> None:
+        """서버 시작 시 CUDA 커널 사전 컴파일용 더미 추론"""
+        logger.info("모델 워밍업 시작...")
+        try:
+            list(self.stream_generate(
+                messages=[{"role": "user", "content": "안녕"}],
+                max_new_tokens=1,
+            ))
+            logger.info("모델 워밍업 완료")
+        except Exception as e:
+            logger.warning(f"워밍업 중 오류 (무시): {e}")
 
     def stream_generate(
         self,

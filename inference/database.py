@@ -4,12 +4,16 @@ from pathlib import Path
 
 import aiosqlite
 
-DB_PATH = Path(__file__).parent.parent / "data" / "chatbot.db"
+from config import settings
+
+DB_PATH = Path(settings.db_path)
 
 
 async def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        # WAL 모드: 동시 읽기·쓰기 성능 향상, 데이터 손실 위험 최소화
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA foreign_keys = ON")
         await db.execute(
             """
@@ -48,23 +52,38 @@ async def create_session(title: str = "새 대화") -> dict:
     return {"id": session_id, "title": title, "created_at": now, "updated_at": now}
 
 
-async def get_sessions() -> list:
+async def get_sessions(q: str | None = None) -> list:
+    """세션 목록 조회. q 지정 시 제목 검색 (대소문자 무시)"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+        if q:
+            async with db.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions "
+                "WHERE title LIKE ? ORDER BY updated_at DESC",
+                (f"%{q}%",),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with db.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
 
-async def get_session_messages(session_id: str) -> list:
+async def get_session_messages(
+    session_id: str,
+    limit: int = 100,
+    offset: int = 0,
+) -> list:
+    """특정 세션의 메시지 조회 (페이지네이션 지원)"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT id, session_id, role, content, created_at "
-            "FROM messages WHERE session_id = ? ORDER BY id ASC",
-            (session_id,),
+            "FROM messages WHERE session_id = ? ORDER BY id ASC "
+            "LIMIT ? OFFSET ?",
+            (session_id, limit, offset),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]

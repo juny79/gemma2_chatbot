@@ -4,12 +4,16 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Thread
-from typing import List
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
+from config import settings
 from database import (
     init_db,
     create_session,
@@ -21,8 +25,9 @@ from database import (
     delete_session,
 )
 from model import GemmaInference
-from prompts import build_messages
+from prompts import build_messages, build_auto_title_messages
 from schemas import (
+    AutoTitleRequest,
     ChatRequest,
     SaveMessagesRequest,
     SessionCreate,
@@ -38,29 +43,36 @@ gemma: GemmaInference | None = None
 
 FRONTEND_PATH = Path(__file__).parent.parent / "frontend" / "index.html"
 
+# ── Rate Limiter 초기화 ───────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global gemma
     logger.info("=== 점마 뭐꼬? 서버 시작 ===")
     await init_db()
-    logger.info("SQLite DB 초기화 완료")
+    logger.info("SQLite DB 초기화 완료 (WAL 모드)")
     gemma = GemmaInference.get_instance()
+    gemma.warmup()
     yield
     logger.info("=== 서버 종료 ===")
 
 
 app = FastAPI(
     title="점마 뭐꼬? — 웹소설/시나리오 창작 챗봇",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -81,10 +93,13 @@ async def serve_frontend():
 
 @app.get("/health")
 async def health():
+    model_path = Path(settings.gguf_model_path)
     return {
         "status": "ok",
-        "model": "gemma-2-9b-it-AWQ",
-        "model_loaded": gemma is not None,
+        "model": model_path.name,
+        "model_path": str(model_path),
+        "model_loaded": gemma is not None and gemma.model is not None,
+        "n_ctx": settings.n_ctx,
     }
 
 
@@ -99,17 +114,21 @@ async def new_session(body: SessionCreate):
 
 
 @app.get("/sessions", response_model=List[SessionResponse], tags=["Sessions"])
-async def list_sessions():
-    """모든 세션 목록 (최신순)"""
-    return await get_sessions()
+async def list_sessions(q: Optional[str] = Query(default=None, max_length=100)):
+    """모든 세션 목록 (최신순). q 파라미터로 제목 검색 가능."""
+    return await get_sessions(q=q)
 
 
 @app.get("/sessions/{session_id}/messages", response_model=List[MessageResponse], tags=["Sessions"])
-async def get_messages(session_id: str):
-    """특정 세션의 메시지 전체 조회"""
+async def get_messages(
+    session_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """특정 세션의 메시지 조회 (페이지네이션 지원)"""
     if not await session_exists(session_id):
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
-    return await get_session_messages(session_id)
+    return await get_session_messages(session_id, limit=limit, offset=offset)
 
 
 @app.post("/sessions/{session_id}/messages", status_code=204, tags=["Sessions"])
@@ -137,16 +156,47 @@ async def remove_session(session_id: str):
 
 
 # ──────────────────────────────────────────────────────────────
+# 자동 제목 생성
+# ──────────────────────────────────────────────────────────────
+
+@app.post("/sessions/{session_id}/auto-title", status_code=204, tags=["Sessions"])
+@limiter.limit("10/minute")
+async def auto_title(session_id: str, body: AutoTitleRequest, request: Request):
+    """
+    첫 번째 사용자 메시지를 바탕으로 LLM이 세션 제목을 자동 생성합니다.
+    생성된 제목으로 세션 제목을 즉시 업데이트합니다.
+    """
+    if gemma is None:
+        raise HTTPException(status_code=503, detail="모델이 아직 로딩 중입니다.")
+    if not await session_exists(session_id):
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+    messages = build_auto_title_messages(body.first_user_message)
+    title_tokens: list[str] = []
+    for token in gemma.stream_generate(messages=messages, max_new_tokens=30, temperature=0.3):
+        title_tokens.append(token)
+
+    raw_title = "".join(title_tokens).strip()
+    # 따옴표, 줄바꿈, 마침표 제거 후 최대 50자
+    title = raw_title.strip('"\'""''\n.。').strip()[:50] or body.first_user_message[:25]
+
+    ok = await update_session_title(session_id, title)
+    if not ok:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+
+# ──────────────────────────────────────────────────────────────
 # 스트리밍 채팅 엔드포인트
 # ──────────────────────────────────────────────────────────────
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+@limiter.limit(settings.rate_limit_chat)
+async def chat_stream(request: Request, body: ChatRequest):
     """
     SSE(Server-Sent Events) 스트리밍 응답.
     프론트에서 fetch + ReadableStream으로 수신합니다.
 
-    request.messages 형식:
+    body.messages 형식:
       [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
     마지막 항목이 현재 사용자 메시지입니다.
     """
@@ -154,14 +204,14 @@ async def chat_stream(request: ChatRequest):
         raise HTTPException(status_code=503, detail="모델이 아직 로딩 중입니다.")
 
     # 히스토리와 현재 메시지 분리
-    history = [m.model_dump() for m in request.messages[:-1]]
-    current_user_msg = request.messages[-1].content
+    history = [m.model_dump() for m in body.messages[:-1]]
+    current_user_msg = body.messages[-1].content
 
     # 시스템 프롬프트 + RAG 컨텍스트 주입
     messages = build_messages(
         history=history,
         user_message=current_user_msg,
-        rag_context=request.rag_context,
+        rag_context=body.rag_context,
     )
 
     loop = asyncio.get_event_loop()
@@ -172,10 +222,10 @@ async def chat_stream(request: ChatRequest):
         try:
             for token in gemma.stream_generate(
                 messages=messages,
-                max_new_tokens=request.max_new_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                repetition_penalty=request.repetition_penalty,
+                max_new_tokens=body.max_new_tokens,
+                temperature=body.temperature,
+                top_p=body.top_p,
+                repetition_penalty=body.repetition_penalty,
             ):
                 loop.call_soon_threadsafe(queue.put_nowait, token)
         except Exception as e:
@@ -203,27 +253,6 @@ async def chat_stream(request: ChatRequest):
             "X-Accel-Buffering": "no",  # Nginx 프록시 버퍼링 비활성화
         },
     )
-
-
-# ──────────────────────────────────────────────────────────────
-# Phase 2 예약: RAG 문서 업로드 (LangChain + ChromaDB)
-# ──────────────────────────────────────────────────────────────
-
-@app.post("/rag/upload", tags=["RAG (Phase 2)"])
-async def rag_upload():
-    """
-    [Phase 2] 웹소설 원고 / 세계관 설정집 업로드 → ChromaDB 벡터 인덱싱
-    현재는 미구현 (Phase 2에서 LangChain + ChromaDB로 활성화 예정)
-    """
-    return {"message": "Phase 2에서 구현 예정입니다."}
-
-
-@app.post("/rag/search", tags=["RAG (Phase 2)"])
-async def rag_search():
-    """
-    [Phase 2] 쿼리와 관련된 문맥 검색 → /chat/stream의 rag_context로 주입
-    """
-    return {"message": "Phase 2에서 구현 예정입니다."}
 
 
 if __name__ == "__main__":
